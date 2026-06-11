@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Live Camera Color Mixer</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="stage" aria-label="Live camera preview">
+        <canvas id="cameraCanvas" aria-label="Remixed live camera feed"></canvas>
+        <video id="cameraVideo" playsinline muted></video>
+
+        <div class="status-bar" id="statusBar">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="statusText">Camera idle</span>
+        </div>
+
+        <button class="primary-action" id="startButton" type="button">
+          <span class="button-icon" aria-hidden="true">▶</span>
+          Start camera
+        </button>
+      </section>
+
+      <aside class="control-panel" aria-label="Camera mixer controls">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Live mixer</p>
+            <h1>Camera Color Mixer</h1>
+          </div>
+          <button class="icon-button" id="snapshotButton" type="button" aria-label="Download snapshot" title="Download snapshot">
+            ⇩
+          </button>
+        </div>
+
+        <label class="field">
+          <span>Camera</span>
+          <select id="cameraSelect"></select>
+        </label>
+
+        <div class="segmented" role="radiogroup" aria-label="Color mode">
+          <button class="segment is-active" data-mode="natural" type="button">Natural</button>
+          <button class="segment" data-mode="duotone" type="button">Duo</button>
+          <button class="segment" data-mode="thermal" type="button">Thermal</button>
+          <button class="segment" data-mode="solar" type="button">Solar</button>
+          <button class="segment" data-mode="channel" type="button">Swap</button>
+          <button class="segment" data-mode="mono" type="button">Mono</button>
+        </div>
+
+        <div class="switch-row">
+          <label class="switch">
+            <input id="mirrorToggle" type="checkbox" checked />
+            <span>Mirror</span>
+          </label>
+          <label class="switch">
+            <input id="invertToggle" type="checkbox" />
+            <span>Invert</span>
+          </label>
+          <label class="switch">
+            <input id="posterToggle" type="checkbox" />
+            <span>Poster</span>
+          </label>
+        </div>
+
+        <section class="control-group" aria-label="Core color controls">
+          <label class="slider-row">
+            <span>Hue</span>
+            <input id="hueSlider" type="range" min="-180" max="180" value="0" />
+            <output id="hueValue">0</output>
+          </label>
+          <label class="slider-row">
+            <span>Saturation</span>
+            <input id="saturationSlider" type="range" min="0" max="240" value="115" />
+            <output id="saturationValue">115</output>
+          </label>
+          <label class="slider-row">
+            <span>Contrast</span>
+            <input id="contrastSlider" type="range" min="40" max="220" value="112" />
+            <output id="contrastValue">112</output>
+          </label>
+          <label class="slider-row">
+            <span>Exposure</span>
+            <input id="exposureSlider" type="range" min="-80" max="80" value="0" />
+            <output id="exposureValue">0</output>
+          </label>
+          <label class="slider-row">
+            <span>Remix</span>
+            <input id="remixSlider" type="range" min="0" max="100" value="62" />
+            <output id="remixValue">62</output>
+          </label>
+        </section>
+
+        <section class="control-group" aria-label="Channel controls">
+          <label class="slider-row compact">
+            <span>Red</span>
+            <input id="redSlider" type="range" min="0" max="220" value="115" />
+            <output id="redValue">115</output>
+          </label>
+          <label class="slider-row compact">
+            <span>Green</span>
+            <input id="greenSlider" type="range" min="0" max="220" value="105" />
+            <output id="greenValue">105</output>
+          </label>
+          <label class="slider-row compact">
+            <span>Blue</span>
+            <input id="blueSlider" type="range" min="0" max="220" value="120" />
+            <output id="blueValue">120</output>
+          </label>
+        </section>
+
+        <section class="palette-row" aria-label="Duotone colors">
+          <label>
+            <span>Shadow</span>
+            <input id="shadowColor" type="color" value="#10131c" />
+          </label>
+          <label>
+            <span>Mid</span>
+            <input id="midColor" type="color" value="#00d8a7" />
+          </label>
+          <label>
+            <span>Light</span>
+            <input id="lightColor" type="color" value="#ff5a4f" />
+          </label>
+        </section>
+
+        <div class="button-row">
+          <button id="randomButton" type="button">Random remix</button>
+          <button id="resetButton" type="button">Reset</button>
+        </div>
+      </aside>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
