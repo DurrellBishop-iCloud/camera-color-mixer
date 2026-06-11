@@ -10,6 +10,7 @@
     <main class="app-shell">
       <section class="stage" aria-label="Live camera preview">
         <canvas id="cameraCanvas" aria-label="Remixed live camera feed"></canvas>
+        <canvas id="physicsCanvas" aria-label="Bouncing Matter.js balls"></canvas>
         <video id="cameraVideo" playsinline muted></video>
 
         <div class="status-bar" id="statusBar">
@@ -109,6 +110,33 @@
           </label>
         </section>
 
+        <section class="control-group" aria-label="Physics controls">
+          <label class="switch wide">
+            <input id="physicsToggle" type="checkbox" checked />
+            <span>Balls</span>
+          </label>
+          <label class="slider-row">
+            <span>Count</span>
+            <input id="ballCountSlider" type="range" min="0" max="48" value="22" />
+            <output id="ballCountValue">22</output>
+          </label>
+          <label class="slider-row">
+            <span>Bounce</span>
+            <input id="bounceSlider" type="range" min="20" max="112" value="94" />
+            <output id="bounceValue">94</output>
+          </label>
+          <label class="slider-row">
+            <span>Video push</span>
+            <input id="videoPushSlider" type="range" min="0" max="100" value="66" />
+            <output id="videoPushValue">66</output>
+          </label>
+          <label class="slider-row">
+            <span>Gravity</span>
+            <input id="gravitySlider" type="range" min="0" max="100" value="24" />
+            <output id="gravityValue">24</output>
+          </label>
+        </section>
+
         <section class="palette-row" aria-label="Duotone colors">
           <label>
             <span>Shadow</span>
@@ -131,6 +159,7 @@
       </aside>
     </main>
 
+    <script src="matter.min.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

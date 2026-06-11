@@ -1,6 +1,8 @@
 const video = document.querySelector("#cameraVideo");
 const canvas = document.querySelector("#cameraCanvas");
 const ctx = canvas.getContext("2d", { willReadFrequently: true });
+const physicsCanvas = document.querySelector("#physicsCanvas");
+const physicsCtx = physicsCanvas.getContext("2d");
 const sourceCanvas = document.createElement("canvas");
 const sourceCtx = sourceCanvas.getContext("2d", { willReadFrequently: true });
 
@@ -19,9 +21,14 @@ const controls = {
   red: bindSlider("red"),
   green: bindSlider("green"),
   blue: bindSlider("blue"),
+  ballCount: bindSlider("ballCount"),
+  bounce: bindSlider("bounce"),
+  videoPush: bindSlider("videoPush"),
+  gravity: bindSlider("gravity"),
   mirror: document.querySelector("#mirrorToggle"),
   invert: document.querySelector("#invertToggle"),
   poster: document.querySelector("#posterToggle"),
+  physics: document.querySelector("#physicsToggle"),
   shadow: document.querySelector("#shadowColor"),
   mid: document.querySelector("#midColor"),
   light: document.querySelector("#lightColor"),
@@ -36,12 +43,29 @@ const defaults = {
   red: 115,
   green: 105,
   blue: 120,
+  ballCount: 22,
+  bounce: 94,
+  videoPush: 66,
+  gravity: 24,
   mirror: true,
   invert: false,
   poster: false,
+  physics: true,
   shadow: "#10131c",
   mid: "#00d8a7",
   light: "#ff5a4f",
+};
+
+const matter = window.Matter;
+const physics = {
+  engine: matter?.Engine.create(),
+  balls: [],
+  walls: [],
+  width: 1,
+  height: 1,
+  scale: 1,
+  lastTime: 0,
+  mouseConstraint: null,
 };
 
 let mode = "natural";
@@ -77,8 +101,18 @@ for (const slider of Object.values(controls)) {
   }
 }
 
+controls.physics.addEventListener("change", () => {
+  syncBallCount();
+  drawPhysics();
+});
+controls.ballCount.addEventListener("input", syncBallCount);
+controls.bounce.addEventListener("input", updatePhysicsSettings);
+controls.gravity.addEventListener("input", updatePhysicsSettings);
+
+initPhysics();
 populateCameras();
 drawIdleFrame();
+drawPhysics();
 
 async function startCamera() {
   try {
@@ -150,7 +184,8 @@ function renderFrame() {
     return;
   }
 
-  const { width, height } = resizeCanvas();
+  const metrics = resizeCanvas();
+  const { width, height } = metrics;
 
   if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && width > 0 && height > 0) {
     sourceCtx.save();
@@ -167,6 +202,7 @@ function renderFrame() {
     const frame = sourceCtx.getImageData(0, 0, width, height);
     applyColorMix(frame.data, width, height);
     ctx.putImageData(frame, 0, 0);
+    stepPhysics(frame, metrics);
   }
 
   frameId = requestAnimationFrame(renderFrame);
@@ -299,6 +335,9 @@ function resetMixer() {
 
   mode = "natural";
   modeButtons.forEach((button) => button.classList.toggle("is-active", button.dataset.mode === mode));
+  syncBallCount();
+  updatePhysicsSettings();
+  drawPhysics();
 }
 
 function randomRemix() {
@@ -312,11 +351,18 @@ function randomRemix() {
   setRange(controls.red, randomInt(60, 190));
   setRange(controls.green, randomInt(60, 190));
   setRange(controls.blue, randomInt(60, 190));
+  setRange(controls.ballCount, randomInt(8, 38));
+  setRange(controls.bounce, randomInt(74, 112));
+  setRange(controls.videoPush, randomInt(18, 100));
+  setRange(controls.gravity, randomInt(0, 55));
   controls.poster.checked = Math.random() > 0.72;
   controls.invert.checked = Math.random() > 0.86;
+  controls.physics.checked = true;
   controls.shadow.value = randomColor(18, 90);
   controls.mid.value = randomColor(80, 210);
   controls.light.value = randomColor(150, 255);
+  syncBallCount();
+  updatePhysicsSettings();
 }
 
 function setRange(input, value) {
@@ -331,9 +377,15 @@ function downloadSnapshot() {
   }
 
   const link = document.createElement("a");
+  const outputCanvas = document.createElement("canvas");
+  const outputCtx = outputCanvas.getContext("2d");
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  outputCanvas.width = canvas.width;
+  outputCanvas.height = canvas.height;
+  outputCtx.drawImage(canvas, 0, 0);
+  outputCtx.drawImage(physicsCanvas, 0, 0, canvas.width, canvas.height);
   link.download = `camera-remix-${stamp}.png`;
-  link.href = canvas.toDataURL("image/png");
+  link.href = outputCanvas.toDataURL("image/png");
   link.click();
 }
 
@@ -391,7 +443,257 @@ function resizeCanvas() {
     sourceCanvas.height = height;
   }
 
-  return { width, height };
+  if (physicsCanvas.width !== width || physicsCanvas.height !== height) {
+    physicsCanvas.width = width;
+    physicsCanvas.height = height;
+  }
+
+  const scale = width / cssWidth;
+  syncPhysicsBounds(cssWidth, cssHeight, scale);
+
+  return { width, height, cssWidth, cssHeight, scale };
+}
+
+function initPhysics() {
+  if (!matter) {
+    controls.physics.checked = false;
+    controls.physics.disabled = true;
+    controls.ballCount.disabled = true;
+    controls.bounce.disabled = true;
+    controls.videoPush.disabled = true;
+    controls.gravity.disabled = true;
+    return;
+  }
+
+  physics.engine.gravity.x = 0;
+  physics.engine.gravity.y = defaults.gravity / 100;
+  physics.engine.positionIterations = 8;
+  physics.engine.velocityIterations = 6;
+
+  const mouse = matter.Mouse.create(physicsCanvas);
+  physics.mouseConstraint = matter.MouseConstraint.create(physics.engine, {
+    mouse,
+    constraint: {
+      damping: 0.12,
+      stiffness: 0.18,
+      render: { visible: false },
+    },
+  });
+  matter.Composite.add(physics.engine.world, physics.mouseConstraint);
+}
+
+function syncPhysicsBounds(width, height, scale) {
+  if (!matter) return;
+
+  const sizeChanged = Math.abs(width - physics.width) > 1 || Math.abs(height - physics.height) > 1;
+  physics.width = width;
+  physics.height = height;
+  physics.scale = scale;
+
+  if (physics.mouseConstraint?.mouse) {
+    physics.mouseConstraint.mouse.pixelRatio = scale;
+  }
+
+  if (!sizeChanged && physics.walls.length) {
+    return;
+  }
+
+  if (physics.walls.length) {
+    matter.Composite.remove(physics.engine.world, physics.walls);
+  }
+
+  const wall = 140;
+  physics.walls = [
+    matter.Bodies.rectangle(width / 2, -wall / 2, width + wall * 2, wall, { isStatic: true }),
+    matter.Bodies.rectangle(width / 2, height + wall / 2, width + wall * 2, wall, { isStatic: true }),
+    matter.Bodies.rectangle(-wall / 2, height / 2, wall, height + wall * 2, { isStatic: true }),
+    matter.Bodies.rectangle(width + wall / 2, height / 2, wall, height + wall * 2, { isStatic: true }),
+  ];
+  matter.Composite.add(physics.engine.world, physics.walls);
+
+  for (const ball of physics.balls) {
+    const radius = ball.circleRadius || 20;
+    matter.Body.setPosition(ball, {
+      x: clamp(ball.position.x, radius, width - radius),
+      y: clamp(ball.position.y, radius, height - radius),
+    });
+  }
+
+  syncBallCount();
+}
+
+function syncBallCount() {
+  if (!matter) return;
+
+  const target = controls.physics.checked ? Number(controls.ballCount.value) : 0;
+  while (physics.balls.length < target) {
+    const ball = createBall();
+    physics.balls.push(ball);
+    matter.Composite.add(physics.engine.world, ball);
+  }
+
+  while (physics.balls.length > target) {
+    const ball = physics.balls.pop();
+    matter.Composite.remove(physics.engine.world, ball);
+  }
+
+  updatePhysicsSettings();
+}
+
+function createBall() {
+  const radius = randomInt(14, 34);
+  const width = Math.max(physics.width, radius * 4);
+  const height = Math.max(physics.height, radius * 4);
+  const ball = matter.Bodies.circle(randomInt(radius, width - radius), randomInt(radius, height - radius), radius, {
+    density: 0.0014,
+    friction: 0.002,
+    frictionAir: 0.008,
+    restitution: Number(controls.bounce.value) / 100,
+  });
+
+  ball.plugin = {
+    color: hexToRgb(randomColor(90, 235)),
+    glow: 0.5,
+    lastLuma: 128,
+    phase: Math.random() * Math.PI * 2,
+  };
+
+  matter.Body.setVelocity(ball, {
+    x: randomFloat(-5.5, 5.5),
+    y: randomFloat(-4, 2),
+  });
+  matter.Body.setAngularVelocity(ball, randomFloat(-0.18, 0.18));
+
+  return ball;
+}
+
+function updatePhysicsSettings() {
+  if (!matter) return;
+
+  const bounce = Number(controls.bounce.value) / 100;
+  physics.engine.gravity.y = Number(controls.gravity.value) / 100;
+
+  for (const ball of physics.balls) {
+    ball.restitution = bounce;
+    ball.frictionAir = 0.004 + Math.max(0, 1 - bounce) * 0.018;
+  }
+}
+
+function stepPhysics(frame, metrics) {
+  if (!matter) return;
+
+  syncPhysicsBounds(metrics.cssWidth, metrics.cssHeight, metrics.scale);
+
+  if (!controls.physics.checked) {
+    drawPhysics();
+    return;
+  }
+
+  syncBallCount();
+  applyVideoForces(frame, metrics);
+
+  const now = performance.now();
+  const delta = physics.lastTime ? clamp(now - physics.lastTime, 8, 33) : 1000 / 60;
+  physics.lastTime = now;
+  matter.Engine.update(physics.engine, delta);
+  drawPhysics();
+}
+
+function applyVideoForces(frame, metrics) {
+  const strength = Number(controls.videoPush.value) / 100;
+  if (strength <= 0 || !physics.balls.length) return;
+
+  for (const ball of physics.balls) {
+    const radius = ball.circleRadius || 20;
+    const center = sampleFrame(frame, ball.position.x, ball.position.y, metrics);
+    const left = sampleFrame(frame, ball.position.x - radius * 0.9, ball.position.y, metrics);
+    const right = sampleFrame(frame, ball.position.x + radius * 0.9, ball.position.y, metrics);
+    const up = sampleFrame(frame, ball.position.x, ball.position.y - radius * 0.9, metrics);
+    const down = sampleFrame(frame, ball.position.x, ball.position.y + radius * 0.9, metrics);
+    const motion = (center.luma - ball.plugin.lastLuma) / 255;
+    const pulse = Math.abs(motion);
+    const phase = ball.plugin.phase + performance.now() * 0.0016;
+    const scale = strength * ball.mass;
+
+    ball.plugin.color = center;
+    ball.plugin.glow = clamp01(center.luma / 255);
+    ball.plugin.lastLuma = center.luma;
+
+    matter.Body.applyForce(ball, ball.position, {
+      x: ((right.luma - left.luma) / 255) * 0.0012 * scale + Math.cos(phase) * pulse * 0.0014 * scale,
+      y: ((down.luma - up.luma) / 255) * 0.0012 * scale - pulse * 0.0017 * scale,
+    });
+
+    if (pulse > 0.18) {
+      matter.Body.setAngularVelocity(ball, clamp(ball.angularVelocity + motion * 0.08, -0.45, 0.45));
+    }
+  }
+}
+
+function sampleFrame(frame, x, y, metrics) {
+  const px = clampInt(Math.round((x / metrics.cssWidth) * (frame.width - 1)), 0, frame.width - 1);
+  const py = clampInt(Math.round((y / metrics.cssHeight) * (frame.height - 1)), 0, frame.height - 1);
+  const index = (py * frame.width + px) * 4;
+  const r = frame.data[index];
+  const g = frame.data[index + 1];
+  const b = frame.data[index + 2];
+  return {
+    r,
+    g,
+    b,
+    luma: 0.2126 * r + 0.7152 * g + 0.0722 * b,
+  };
+}
+
+function drawPhysics() {
+  physicsCtx.setTransform(physics.scale, 0, 0, physics.scale, 0, 0);
+  physicsCtx.clearRect(0, 0, physics.width, physics.height);
+
+  if (!matter || !controls.physics.checked) {
+    return;
+  }
+
+  physicsCtx.lineWidth = 1.5;
+  physicsCtx.globalCompositeOperation = "source-over";
+
+  for (const ball of physics.balls) {
+    const radius = ball.circleRadius || 20;
+    const { x, y } = ball.position;
+    const color = ball.plugin.color || { r: 66, g: 165, b: 255 };
+    const glow = 0.34 + (ball.plugin.glow || 0.5) * 0.66;
+    const gradient = physicsCtx.createRadialGradient(
+      x - radius * 0.34,
+      y - radius * 0.38,
+      radius * 0.12,
+      x,
+      y,
+      radius,
+    );
+
+    gradient.addColorStop(0, "rgba(255, 255, 255, 0.94)");
+    gradient.addColorStop(0.22, `rgba(${color.r}, ${color.g}, ${color.b}, 0.96)`);
+    gradient.addColorStop(1, `rgba(${Math.round(color.r * 0.24)}, ${Math.round(color.g * 0.24)}, ${Math.round(color.b * 0.24)}, 0.94)`);
+
+    physicsCtx.save();
+    physicsCtx.shadowBlur = 18 + glow * 22;
+    physicsCtx.shadowColor = `rgba(${color.r}, ${color.g}, ${color.b}, ${0.28 + glow * 0.32})`;
+    physicsCtx.beginPath();
+    physicsCtx.arc(x, y, radius, 0, Math.PI * 2);
+    physicsCtx.fillStyle = gradient;
+    physicsCtx.fill();
+    physicsCtx.shadowBlur = 0;
+    physicsCtx.strokeStyle = "rgba(255, 255, 255, 0.62)";
+    physicsCtx.stroke();
+
+    physicsCtx.translate(x, y);
+    physicsCtx.rotate(ball.angle);
+    physicsCtx.beginPath();
+    physicsCtx.moveTo(-radius * 0.58, 0);
+    physicsCtx.lineTo(radius * 0.58, 0);
+    physicsCtx.strokeStyle = "rgba(255, 255, 255, 0.42)";
+    physicsCtx.stroke();
+    physicsCtx.restore();
+  }
 }
 
 function drawVideoCover(targetCtx, source, width, height) {
@@ -538,6 +840,10 @@ function clamp01(value) {
   return Math.min(1, Math.max(0, value));
 }
 
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function clampByte(value) {
   return Math.round(Math.min(255, Math.max(0, value)));
 }
@@ -554,6 +860,10 @@ function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+function randomFloat(min, max) {
+  return Math.random() * (max - min) + min;
+}
+
 function randomColor(min, max) {
   const channel = () => randomInt(min, max).toString(16).padStart(2, "0");
   return `#${channel()}${channel()}${channel()}`;
@@ -563,4 +873,5 @@ window.addEventListener("resize", () => {
   if (!stream) {
     drawIdleFrame();
   }
+  drawPhysics();
 });
